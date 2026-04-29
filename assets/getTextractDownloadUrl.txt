@@ -1,0 +1,100 @@
+import { S3Client, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+const s3Client = new S3Client({ region: "us-west-2" }); // Change to your region
+
+export const handler = async (event) => {
+  try {
+    // Parse request body
+    const { fileKey } = JSON.parse(event.body);
+    
+    if (!fileKey) {
+      return {
+        statusCode: 400,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*"
+        },
+        body: JSON.stringify({ error: "fileKey is required" })
+      };
+    }
+    
+    //console.log("Checking if file exists:", fileKey);
+    
+    // Check if file exists before generating URL
+    try {
+      const headCommand = new HeadObjectCommand({
+      Bucket: "antibodyrespbux",
+      Key: fileKey
+      });
+      
+      await s3Client.send(headCommand);
+      console.log("✓ File exists");
+      
+    } catch (error) {
+      // File doesn't exist
+      if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
+        console.log("✗ File not found:", fileKey);
+        return {
+          statusCode: 404,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          },
+          body: JSON.stringify({ 
+            error: "File not found",
+            message: `The file '${fileKey}' does not exist`,
+            fileKey: fileKey
+          })
+        };
+      }
+      // Other error (permissions, etc)
+      throw error;
+    }
+    
+    // File exists, generate presigned URL
+    //console.log("Generating presigned URL...");
+    
+    const command = new GetObjectCommand({
+      Bucket: "antibodyrespbux",
+      Key: fileKey
+    });
+    
+    const downloadUrl = await getSignedUrl(s3Client, command, { 
+      expiresIn: 900 
+    });
+    
+    console.log("✓ Presigned URL generated");
+    const bucketParams = {
+      Bucket: "antibodyrespbux",
+      Key: fileKey
+    };
+    
+    return {
+      statusCode: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      },
+      body: JSON.stringify({ 
+        downloadUrl: downloadUrl,
+        expiresIn: 900
+      })
+    };
+    
+  } catch (error) {
+    console.error("Error:", error);
+    
+    return {
+      statusCode: 500,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      },
+      body: JSON.stringify({ 
+        error: "Failed to generate download URL",
+        message: error.message
+      })
+    };
+  }
+};

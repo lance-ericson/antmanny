@@ -1,0 +1,52 @@
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+// Initialize S3 Client (automatically uses IAM Role permissions)
+const s3Client = new S3Client({ region: "us-west-2" });
+
+export const handler = async (event) => {
+    try {
+        // Parse the body sent from React Native
+        const body = JSON.parse(event.body);
+        const { fileName, fileType } = body;
+
+        if (!fileName || !fileType) {
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: "Missing fileName or fileType" })
+            };
+        }
+
+        // 1. Create the command for putting an object
+        const command = new PutObjectCommand({
+            Bucket: "", // Change to your actual bucket name
+            Key: fileName,
+            ContentType: fileType,
+        });
+
+        // 2. Generate the signed URL (valid for 5 minutes)
+        const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 });
+        console.log("✓ Presigned URL generated");
+
+        return {
+            statusCode: 200,
+            headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "POST, OPTIONS"
+            },
+            body: JSON.stringify({ uploadUrl })
+        };
+
+    } catch (error) {
+        console.error("Error generating signed URL:", error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ 
+                error: "Internal Server Error", 
+                message: error.message 
+            })
+        };
+    }
+};

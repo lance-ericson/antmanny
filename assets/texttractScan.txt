@@ -1,0 +1,292 @@
+import { TextractClient, StartDocumentAnalysisCommand,AnalyzeDocumentCommand, DetectDocumentTextCommand } from "@aws-sdk/client-textract";
+import { fromBase64} from "@aws-sdk/util-base64-node";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+
+// enter value for accesskey and secretacesskey
+const s3Client = new S3Client({
+    region: "us-west-2",
+    credentials: {
+      accessKeyId: "",
+      secretAccessKey: "",
+    },
+});
+
+const client = new TextractClient({ region: "us-west-2" });
+ 
+  function getText(result, blocks_map) {
+    let text = "";
+    if (result["Relationships"]) {
+      for (let relationship of result["Relationships"]) {
+        if (relationship["Type"] === "CHILD") {
+          for (let child_id of relationship["Ids"]) {
+            const word = blocks_map[child_id];
+            if (word["BlockType"] === "WORD") {
+              const words = word["Text"];
+
+              if ((words.length > 1) && (words.includes('0+') || words.includes('+0') || words.includes('00') || words.includes('++'))) {
+                
+                if (words.includes('+W') || words.includes('+w') || words.includes('+S') || words.includes('+s')) {
+
+                }
+                else {
+                  const i = words.indexOf("+");
+                  let left = i === -1 ? words : words.slice(0, i);
+                  const right = i === -1 ? "" : words.slice(i);
+                  const characters = words.split('');
+
+                  if (i > 0) {
+                    if (left != "0".repeat(i)) {
+                      const rightchars = right.split('').join(' ');
+                      left = left.concat(" ");
+                      word["Text"] = [...left, ...rightchars].join('');
+                    }
+                    else
+                    {
+                      const result = characters.join(' ');
+                      word["Text"] = result;
+                    }
+                  }
+                  else if (characters.includes("+")) 
+                  {
+                    const result = characters.join(' ');
+                    word["Text"] = result;
+                  }
+                  else if (!characters.some(w => /[1-9]/.test(w)) && !characters.some(a => /[A-V]/.test(a)) && !characters.some(b => /[a-v]/.test(b)))
+                  {
+                    const result = characters.join(' ');
+                    word["Text"] = result;
+                  }
+              }
+              }
+
+              text += word["Text"] + " ";
+            }
+            //if (word["BlockType"] == "SELECTION_ELEMENT") {
+            //  if (word["SelectionStatus"] === "SELECTED") text += "X ";
+            //}
+          }
+        }
+      }
+    }
+  
+    return text;
+  }
+  
+  function getKvMap(response) {
+    const blocks = response["Blocks"];
+    const key_map = {};
+    const value_map = {};
+    const block_map = {};
+  
+    for (let block of blocks) {
+      const block_id = block["Id"];
+      block_map[block_id] = block;
+      if (block["BlockType"] === "KEY_VALUE_SET") {
+        if (block["EntityTypes"].includes("KEY")) {
+          key_map[block_id] = block;
+        } else {
+          value_map[block_id] = block;
+        }
+      }
+    }
+    return { key_map, value_map, block_map };
+  }
+  
+  function getKvRelationship(key_map, value_map, block_map) {
+    let kvs = {};
+    for (const [block_id, key_block] of Object.entries(key_map)) {
+      const value_block = findValueBlock(key_block, value_map);
+      const key = getText(key_block, block_map);
+      const val = getText(value_block, block_map);
+      kvs[key] = val;
+    }
+  
+    return kvs;
+  }
+  
+  function findValueBlock(key_block, value_map) {
+    let value_block;
+    for (let relationship of key_block["Relationships"]) {
+      if (relationship["Type"] === "VALUE") {
+        for (let value_id of relationship["Ids"]) {
+          value_block = value_map[value_id];
+        }
+      }
+    }
+    return value_block;
+  }
+  
+  function getKeyValue(response) {
+    const { key_map, value_map, block_map } = getKvMap(response);
+    return getKvRelationship(key_map, value_map, block_map);
+  }
+  
+  function getRowsColumnsMap(table_result, blocks_map) {
+    const rows = {};
+  
+    for (let relationship of table_result["Relationships"]) {
+      if (relationship["Type"] === "CHILD") {
+        for (let child_id of relationship["Ids"]) {
+          const cell = blocks_map[child_id];
+          if (cell["BlockType"] === "CELL") {
+            const row_index = cell["RowIndex"];
+            const col_index = cell["ColumnIndex"];
+            if (!(row_index in rows)) {
+              rows[row_index] = {};
+            }
+            rows[row_index][col_index] = getText(cell, blocks_map);
+          }
+        }
+      }
+    }
+  
+    return rows;
+  }
+
+  function generateTableCsv(table_result, blocks_map, table_index) {
+    const rows = getRowsColumnsMap(table_result, blocks_map);
+    const table_id = "Table_".concat("", table_index);
+  
+    let csv = `Table: ${table_id}\n\n`;
+    //   let csvname = `${table_id}.csv`;
+  
+    for (const [row_index, cols] of Object.entries(rows)) {
+      for (const [col_index, text] of Object.entries(cols)) {
+        csv += `${text}`;
+      }
+      csv += "\n";
+    }
+  
+    csv += "\n\n\n";
+    //   fs.writeFileSync(new URL(`csv/${csvname}`, import.meta.url), csv);
+    return csv;
+  }
+  
+  function getTableCsvResults(response) {
+    const blocks = response["Blocks"];
+  
+    const blocks_map = {};
+    const table_blocks = [];
+    //let idx = 0;
+  
+    for (let block of blocks) {
+      blocks_map[block["Id"]] = block;
+      if (block["BlockType"] === "TABLE") 
+      {
+        table_blocks.push(block);
+        //console.log(idx.toString + "Blocktype is TABLE");
+      }
+      else
+      {
+        //console.log(idx.toString + "Blocktype " + block["BlockType"]);
+      }
+      //idx++;
+    }
+  
+    const LENGTH_OF_TABLE_BLOCKS = table_blocks.length;
+  
+    if (LENGTH_OF_TABLE_BLOCKS <= 0) return "<b> NO Table FOUND </b>";
+  
+    let csv = "";
+  
+    for (let index = 0; index < LENGTH_OF_TABLE_BLOCKS; index += 1) {
+      csv += generateTableCsv(table_blocks[index], blocks_map, index + 1);
+      csv += "\n\n";
+    }
+
+    //console.log("Step 6 Add forms data");
+    const outputkv = getKeyValue(response);
+
+    csv = csv + outputkv;
+
+    return csv;
+  }
+
+function extractTextFromResponse(response) {
+    let extractedText = "";
+
+    if (response && response.Blocks) {
+        response.Blocks.forEach(block => {
+            if (block.BlockType === "LINE" && block.Text) {
+                extractedText += block.Text + "\n";
+            }
+        });
+    }
+
+    return extractedText.trim(); // Remove leading/trailing whitespace
+ }   
+
+ /**
+ * Fetch the S3 object from the event and analyze it using Amazon Textract.
+ *
+ */
+export const handler = async (event, context) => {
+    try {
+        //const decodedData = Buffer.from(event.body, "base64").toString();
+        //console.log("Step 0 here");
+        //const command = new AnalyzeDocumentCommand({Document: {Bytes: Buffer.from(decodedData, "base64")},
+        //FeatureTypes: ["TABLES", "FORMS"]});
+        //const command = new DetectDocumentTextCommand({
+        const decodedKey = decodeURIComponent(event.Records[0].s3.object.key.replace(/\+/g, " "));
+        const command = new AnalyzeDocumentCommand({
+            Document: {
+              S3Object: {
+                Bucket: event.Records[0].s3.bucket.name, //"antibodychkrbux",
+                Name: decodedKey, //"pixtest3.JPG",
+              },
+            },
+            FeatureTypes: ["TABLES","FORMS", "LAYOUT"],
+          });
+        //console.log("Step 1 here");
+        //console.log(`Bucket: ${bucket}`);
+        //console.log(`Key: ${key}`);
+
+        let folderprefix = decodedKey.substring(4, 20);
+        const response = await client.send(command);
+        //console.log("Step 1.2 here");
+ 
+        let output = getTableCsvResults(response);
+
+        output = output + "ENDOFTABLEDATA\n"
+
+        //console.log("Step 6 Add forms data");
+        const outputkv = getKeyValue(response);
+
+        //csv = csv;// + outputkv;
+
+        //folderprefix = "resps";
+        const fileKey = folderprefix + "/txtrakResp.json";
+        const extractedText = extractTextFromResponse(response);
+        //console.log("Step 2 here");
+        output = output + outputkv + extractedText;
+        const jsonString = JSON.stringify({data: output});
+        const params = {
+            Bucket:  "antibodyrespbux",
+            Key: fileKey,
+            Body: jsonString,
+        };        
+
+        try {
+            const command = new PutObjectCommand(params);
+            //console.log("Step 3 here");
+            const resp = await s3Client.send(command);
+            console.log("Object uploaded successfully:", resp);
+        } catch (err) {
+            console.log("error here ");
+            console.log(err);
+        }
+
+        return {
+            statusCode: 200,
+            body: jsonString
+        }
+            
+    }
+    catch(error){
+        console.log("er"+error)
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ message: 'Internal server error, Error processing file'})
+        };
+    }
+};
