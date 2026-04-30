@@ -302,34 +302,20 @@ const toggleAntigen = (group: string, antigenName: string) => {
 
   useEffect(() => {
     const loadManuData = async () => {
-      const storedGroupsStr = await DatabaseService.getSetting(`groups_${manuchoice}`);
-      const storedMembersStr = await DatabaseService.getSetting(`groupMembers_${manuchoice}`);
-      const storedSelectedAntStr = await DatabaseService.getSetting(`selectedAnt_${manuchoice}`);
+      const [loadedGroups, loadedMembers, loadedSelected] = await Promise.all([
+        ConstAntigens.loadGroupOrder(manuchoice),
+        ConstAntigens.loadGroupMembers(manuchoice),
+        ConstAntigens.loadSettingsForManufacturer(manuchoice),
+      ]);
 
-      if (storedGroupsStr && storedGroupsStr.value && storedMembersStr && storedMembersStr.value) {
-        setGroups(JSON.parse(storedGroupsStr.value));
-        setGroupMembers(JSON.parse(storedMembersStr.value));
-      } else {
-        const initialMembers = ConstAntigens.DataSources[manuchoice] || ConstAntigens.DEFAULT_GROUP_MEMBERS;
-        const copyMembers: Record<string, string[]> = {};
-        for (const key in initialMembers) {
-          copyMembers[key] = [...initialMembers[key]];
-        }
-        setGroupMembers(copyMembers);
-        setGroups(ConstAntigens.MANUFACTURER_GRPORDER_MAP[manuchoice] || ConstAntigens.DEFAULT_GROUP_ORDER);
-      }
-
-      if (storedSelectedAntStr && storedSelectedAntStr.value) {
-        setSelected(JSON.parse(storedSelectedAntStr.value));
-      } else {
-        setSelected({});
-      }
+      setGroups(loadedGroups);
+      setGroupMembers(loadedMembers);
+      setSelected(loadedSelected || {});
     };
     loadManuData();
   }, [manuchoice]);
 
   const updateStoredDefaultGroupMembers = (groupName: string, list: string[]) => {
-    ConstAntigens.StoredDefaultGrpMembers[groupName] = list;
     setGroupMembers(prev => ({ ...prev, [groupName]: list }));
 
     if (groupName.toLowerCase() === "rh-hr") {
@@ -338,7 +324,7 @@ const toggleAntigen = (group: string, antigenName: string) => {
   };
 
   const reorderStoredDefaultGroups = (orderedGroups: string[]) => {
-    const currentMembers = ConstAntigens.StoredDefaultGrpMembers;
+    const currentMembers = groupMembers;
     const reorderedMembers: Record<string, string[]> = {};
 
     for (const groupName of orderedGroups) {
@@ -353,17 +339,12 @@ const toggleAntigen = (group: string, antigenName: string) => {
       }
     }
 
-    for (const groupName of Object.keys(currentMembers)) {
-      delete currentMembers[groupName];
-    }
-    Object.assign(currentMembers, reorderedMembers);
-
-    setGroups(Object.keys(reorderedMembers));
+    setGroups(orderedGroups);
     setGroupMembers(reorderedMembers);
   };
 
   const moveAntigen = (groupName: string, index: number, direction: -1 | 1) => {
-    const selectedData = ConstAntigens.StoredDefaultGrpMembers;
+    const selectedData = groupMembers;
     const list = [...(selectedData[groupName] || [])];
     const newIndex = index + direction;
 
@@ -406,20 +387,16 @@ const toggleAntigen = (group: string, antigenName: string) => {
     if (editTarget?.type === 'group') {
       const oldGroupName = editTarget.groupName;
       // Validation to check if group already exists
-      if (Object.keys(ConstAntigens.StoredDefaultGrpMembers).includes(newText) && newText !== oldGroupName) {
+      if (Object.keys(groupMembers).includes(newText) && newText !== oldGroupName) {
         Alert.alert("Duplicate Group", "A group with this name already exists.");
         return;
       }
       // update stored default group members record
-      const currentMembers = ConstAntigens.StoredDefaultGrpMembers;
+      const currentMembers = groupMembers;
       const renamedMembers: Record<string, string[]> = {};
       for (const groupName of Object.keys(currentMembers)) {
         renamedMembers[groupName === oldGroupName ? newText : groupName] = currentMembers[groupName] || [];
       }
-      for (const groupName of Object.keys(currentMembers)) {
-        delete currentMembers[groupName];
-      }
-      Object.assign(currentMembers, renamedMembers);
       setGroups(Object.keys(renamedMembers));
       setGroupMembers(renamedMembers);
       // Update selectedAnt
@@ -436,13 +413,13 @@ const toggleAntigen = (group: string, antigenName: string) => {
       const idx = editTarget.index!;
 
       // Validation to check if antigen already exists in the same group
-      const currentAntigens = ConstAntigens.StoredDefaultGrpMembers[groupName] || [];
+      const currentAntigens = groupMembers[groupName] || [];
       if (currentAntigens.some((name, i) => i !== idx && name === newText)) {
         Alert.alert("Duplicate Antigen", `An antigen named "${newText}" already exists in the "${groupName}" group.`);
         return;
       }
 
-      const list = [...(ConstAntigens.StoredDefaultGrpMembers[groupName] || [])];
+      const list = [...(groupMembers[groupName] || [])];
       list[idx] = newText;
       updateStoredDefaultGroupMembers(groupName, list);
       if (groupName.toLowerCase() === 'rh-hr') {
@@ -458,12 +435,11 @@ const toggleAntigen = (group: string, antigenName: string) => {
 
   const deleteAntigen = async (groupName: string, index: number) => {
     // Remove from stored default group members
-    const updatedMembers = { ...ConstAntigens.StoredDefaultGrpMembers };
+    const updatedMembers = { ...groupMembers };
     const newList = [...(updatedMembers[groupName] || [])];
     const removedAntigen = newList[index];
     newList.splice(index, 1);
     updatedMembers[groupName] = newList;
-    ConstAntigens.StoredDefaultGrpMembers[groupName] = newList;
     setGroupMembers(updatedMembers);
 
     // Remove corresponding selection state
@@ -479,8 +455,8 @@ const toggleAntigen = (group: string, antigenName: string) => {
 
     // Persist immediately to DB
     try {
-      await DatabaseService.saveSetting("antigenMapping_StoredDefaultGrpMembers", JSON.stringify(ConstAntigens.StoredDefaultGrpMembers));
-      await DatabaseService.saveSetting(`selectedAnt_${manuchoice}`, JSON.stringify(updatedSelections));
+      await DatabaseService.saveSetting(`groupMembers_${manuchoice}`, JSON.stringify(updatedMembers));
+      await DatabaseService.saveSetting(`antigenMapping_${manuchoice}`, JSON.stringify(updatedSelections));
     } catch (err) {
       console.error('Error auto-saving after antigen delete:', err);
     }
@@ -579,9 +555,7 @@ const toggleAntigen = (group: string, antigenName: string) => {
               await Promise.all([
                 DatabaseService.removeSetting(`antigenMapping_${normalizedChoice}`),
                 DatabaseService.removeSetting(`groupOrder_${normalizedChoice}`),
-                DatabaseService.removeSetting(`groups_${normalizedChoice}`),
                 DatabaseService.removeSetting(`groupMembers_${normalizedChoice}`),
-                DatabaseService.removeSetting(`selectedAnt_${normalizedChoice}`),
               ]);
 
               await DatabaseService.saveSetting('manufacturersList', JSON.stringify(updatedJsonList));
@@ -872,8 +846,6 @@ const handleSave = async () => {
       }
     }
 
-    await DatabaseService.saveSetting("antigenMapping_StoredDefaultGrpMembers", JSON.stringify(ConstAntigens.StoredDefaultGrpMembers));
-
     await DatabaseService.saveSetting(storageKey, JSON.stringify(selectedAnt));
 
     /**
@@ -917,9 +889,8 @@ const handleSave = async () => {
 
       await DatabaseService.saveSetting('manuchoice', currentChoice);
       await DatabaseService.saveSetting('manufacturersList', JSON.stringify(currentList));
-      await DatabaseService.saveSetting(`groups_${currentChoice}`, JSON.stringify(groups));
+      await DatabaseService.saveSetting(`groupOrder_${currentChoice}`, groups.join(';'));
       await DatabaseService.saveSetting(`groupMembers_${currentChoice}`, JSON.stringify(groupMembers));
-      await DatabaseService.saveSetting(`selectedAnt_${currentChoice}`, JSON.stringify(selectedAnt));
 
     // 4. Refresh UI and Notify
     await refreshManufacturerList();
@@ -1113,10 +1084,10 @@ const handleSave = async () => {
   const renderAntigenContent = () => {
     // 1. Always start with an empty array to "clear" previous renders
     const content: ReactNode[] = [];
-    //const selectedData = groupMembers;
-    const selectedData = ConstAntigens.StoredDefaultGrpMembers;//ConstAntigens.DEFAULT_GROUP_MEMBERS;//ConstAntigens.DataSources[manuchoice];
+    const selectedData = groupMembers;
+    const displayGroups = groups.length > 0 ? groups : Object.keys(selectedData);
 
-    for (const groupName of Object.keys(selectedData)) {
+    for (const groupName of displayGroups) {
       if (!selectedData[groupName]) continue;
       const antigens = selectedData[groupName];
       const nonEmptyAntigens = antigens.filter(antigen => !!antigen);
@@ -1131,25 +1102,25 @@ const handleSave = async () => {
       if (isEditing) {
         antigenDisplay = (
           <NestableDraggableFlatList
-            data={antigens}
-            keyExtractor={(item) => `${groupName}-${item}`}
-            scrollEnabled={false}
-            containerStyle={{ flexGrow: 0 }}
-            contentContainerStyle={{ flexGrow: 0 }}
-            activationDistance={12}
-            onDragEnd={({ data }) => {
+            data                       = {antigens}
+            keyExtractor               = {(item) => `${groupName}-${item}`}
+            scrollEnabled              = {true}
+            containerStyle             = {{ flexGrow: 0 }}
+            contentContainerStyle      = {{ flexGrow: 0 }}
+            activationDistance         = {6}
+            onDragEnd                  = {({ data }) => {
               updateStoredDefaultGroupMembers(groupName, data);
             }}
-            renderItem={({ item: antigen, drag, isActive }) => {
+            renderItem                 = {({ item: antigen, drag, isActive }) => {
               const isSelected = currentGroupSelections.includes(antigen);
               return (
                 <AntigenItem
-                  antigen={antigen}
-                  groupName={groupName}
-                  isSelected={isSelected}
-                  drag={drag}
-                  isActive={isActive}
-                  onToggle={toggleAntigen}
+                  antigen                = {antigen}
+                  groupName              = {groupName}
+                  isSelected             = {isSelected}
+                  drag                   = {drag}
+                  isActive               = {isActive}
+                  onToggle               = {toggleAntigen}
                 />
               );
             }}
@@ -1222,7 +1193,7 @@ const handleSave = async () => {
 
   const toggleAllInGroup = (groupName: string) => {
     setSelected((prev) => {
-      const masterGroupList = (ConstAntigens.StoredDefaultGrpMembers[groupName] || []).filter(antigen => !!antigen);
+      const masterGroupList = (groupMembers[groupName] || []).filter(antigen => !!antigen);
 
       return {
         ...prev,
@@ -1239,7 +1210,7 @@ const handleSave = async () => {
   };
 
   const selectAllAntigens = () => {
-    const selectedData = ConstAntigens.StoredDefaultGrpMembers;
+    const selectedData = groupMembers;
     const nextSelected: Record<string, string[]> = {};
 
     for (const groupName of Object.keys(selectedData)) {
@@ -1253,7 +1224,7 @@ const handleSave = async () => {
   };
 
   const deselectAllAntigens = () => {
-    const selectedData = ConstAntigens.StoredDefaultGrpMembers;
+    const selectedData = groupMembers;
     const nextSelected: Record<string, string[]> = {};
 
     for (const groupName of Object.keys(selectedData)) {
@@ -1355,7 +1326,7 @@ const handleSave = async () => {
     "BIO-RAD": ConstAntigens.BIORAD_GRIFOLS_GROUP_MEMBERS,
   };
 
-  const storedGroups = ConstAntigens.StoredDefaultGrpMembers;
+  const storedGroups = groupMembers;
   const hasAnySelection = Object.keys(storedGroups).some(groupName => (selectedAnt[groupName] || []).length > 0);
   const allSelected = Object.keys(storedGroups).every(groupName => {
     const groupAntigens = (storedGroups[groupName] || []).filter(antigen => !!antigen);
@@ -1463,7 +1434,6 @@ const handleSave = async () => {
                 value={manuName}
                 onChangeText={(text) => setManuNameText(text)}
                 placeholder={manuchoice === "Create New" ? "Enter manufacturer name" : "Or enter Manufacturer"}
-                autoFocus
               />
             </View>
             {/* SPLIT LAYOUT */}
@@ -1510,7 +1480,7 @@ const handleSave = async () => {
                   <Text style={styles.sectionLeftTitle}>Reorder Antigen Groups</Text>
                   <View style={{ minHeight: 400, flex: 1, backgroundColor: '#fff', borderRadius: 8, padding: 10 }}>
                     <DraggableFlatList
-                      data={Object.keys(ConstAntigens.StoredDefaultGrpMembers)}
+                      data={groups}
                       renderItem={renderItem}
                       keyExtractor={(item: any) => item}
                       onDragEnd={({ data}) => reorderStoredDefaultGroups(data)}

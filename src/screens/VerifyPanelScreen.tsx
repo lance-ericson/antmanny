@@ -150,7 +150,7 @@ const VerifyPanelScreen: React.FC<VerifyPanelScreenProps> = ({ route, navigation
 
       try {
         const [savedGroupMembers, savedGroupOrder] = await Promise.all([
-          ConstAntigens.loadSettingsForManufacturer(chosenManufacturer),
+          ConstAntigens.loadGroupMembers(chosenManufacturer),
           ConstAntigens.loadGroupOrder(chosenManufacturer),
         ]);
 
@@ -799,8 +799,17 @@ const VerifyPanelScreen: React.FC<VerifyPanelScreenProps> = ({ route, navigation
           {isEditing ? (
             <TextInput
               style={styles.fieldTextInput}
-              value={panel.metadata?.manufacturer || 'Cannot Read'}
-              onChangeText={setManufacturer}
+              value={manuf}
+              onChangeText={(value) => {
+                setManufacturer(value);
+                setPanel(prevPanel => ({
+                  ...prevPanel,
+                  metadata: {
+                    ...prevPanel.metadata,
+                    manufacturer: value,
+                  }
+                }));
+              }}
               placeholder="Manufacturer"
             />
           ) : (

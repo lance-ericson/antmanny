@@ -18,9 +18,11 @@ import axios from 'axios';
 import ImageResizer from 'react-native-image-resizer';
 import React, {useMemo} from "react";
 import { PanelTableParser } from '../services/PanelTableParser';
+import { validateAndFormatAIResponse } from '../utils/validateAndFormatAIResponse';
 
 enum ScannerErrorCode {
     CAMERA_UNAVAILABLE = 'CAMERA_UNAVAILABLE',
+    AI_ANALYSIS_FAILED = "AI_ANALYSIS_FAILED",
 }
 
 class ScannerError extends Error {

@@ -51,6 +51,8 @@ import { useEffect, useState } from 'react';
     "P",
     "LUTHERAN",
     "Additonal Antigens",
+    "COLTON", 
+    "DIEGO", 
   ];
 
     export const BIOTEST_GROUP_ORDER = [
@@ -79,6 +81,8 @@ import { useEffect, useState } from 'react';
     "LUTHERAN",
     "SEX",
     "Additonal Antigens",
+    "COLTON", 
+    "DIEGO", 
   ];
 
     export const MEDION_GROUP_ORDER = [
@@ -92,6 +96,8 @@ import { useEffect, useState } from 'react';
     "KIDD",
     "SEX",
     "Additonal Antigens",
+    "COLTON", 
+    "DIEGO", 
   ];
 
     export const QUOTIENT_GROUP_ORDER = [
@@ -120,6 +126,8 @@ import { useEffect, useState } from 'react';
     "LUTHERAN",
     "DIEGO",
     "Additonal Antigens",
+    "COLTON",
+    "SEX",
   ];
 
     export const ALBA_GROUP_ORDER = [
@@ -133,6 +141,8 @@ import { useEffect, useState } from 'react';
     "LUTHERAN",
     "SEX",
     "Additonal Antigens",
+    "COLTON", 
+    "DIEGO", 
   ];
 
 
@@ -167,8 +177,6 @@ import { useEffect, useState } from 'react';
   };
 
 
-  export let StoredDefaultGrpMembers: Record<string, string[]> = DEFAULT_GROUP_MEMBERS;
-
   export const GROUP_MEMBERS: Record<string, Set<string>> = {
     "Rh-hr": new Set(["D", "C", "E", "c", "e", "f", "Cw", "V"]),
     KELL: new Set(["K", "k", "Kpa", "Kpb", "Jsa", "Jsb"]),
@@ -195,6 +203,8 @@ import { useEffect, useState } from 'react';
     P: ["P1"],
     LUTHERAN: ["Lua", "Lub"],
     "Additonal Antigens": [""],
+    "COLTON": [""],
+    "DIEGO": [""],
   };
 
   export const ALBA_GROUP_MEMBERS: Record<string, string[]> = {
@@ -208,6 +218,8 @@ import { useEffect, useState } from 'react';
     LUTHERAN: ["Lua", "Lub"],
     "SEX": ["Xga"],
     "Additonal Antigens": ["Wr"],
+    "COLTON": [""],
+    "DIEGO": [""],
   };
 
   export const QUOTIENT_GROUP_MEMBERS: Record<string, string[]> = {
@@ -221,6 +233,8 @@ import { useEffect, useState } from 'react';
     LUTHERAN: ["Lua", "Lub"],
     "SEX": ["Xga"],
     "Additonal Antigens": ["Wra"],
+    "COLTON": [""],
+    "DIEGO": [""],
   };
 
   export const MEDION_GROUP_MEMBERS: Record<string, string[]> = {
@@ -234,6 +248,8 @@ import { useEffect, useState } from 'react';
     KIDD: ["Jka", "Jkb"],
     "SEX": ["Xga"],
     "Additonal Antigens": ["Wr"],
+    "COLTON": [""],
+    "DIEGO": [""],
   };
 
   export const BIOTEST_GROUP_MEMBERS: Record<string, string[]> = {
@@ -248,6 +264,7 @@ import { useEffect, useState } from 'react';
     "SEX": ["Xga"],
     "COLTON": ["Coa", "Cob"],
     "DIEGO": ["Dia", "Dib"],
+   "Additonal Antigens": [""], 
   };
 
   export const BIORAD_GRIFOLS_GROUP_MEMBERS: Record<string, string[]> = {
@@ -260,6 +277,9 @@ import { useEffect, useState } from 'react';
     MNS: ["M", "N", "S", "s"],
     LUTHERAN: ["Lua", "Lub"],
     "DIEGO": ["Dia"],
+    "COLTON": [""],
+    "SEX": [""],
+    "Additonal Antigens": [""], 
   };
 
   export const IMMUCOR_GROUP_MEMBERS: Record<string, string[]> = {
@@ -272,6 +292,9 @@ import { useEffect, useState } from 'react';
     MNS: ["M", "N", "S", "s"],
     LUTHERAN: ["Lua", "Lub"],
     "SEX": ["Xga"],
+    "COLTON": [""],
+    "DIEGO": [""],
+   "Additonal Antigens": [""], 
   };
 
   //   // 1. Define a type for your selection
@@ -375,16 +398,6 @@ import { useEffect, useState } from 'react';
       }
     }
 
-    const savedData  = await DatabaseService.getSetting("antigenMapping_StoredDefaultGrpMembers");
-    
-    if (savedData) {
-      StoredDefaultGrpMembers = JSON.parse(savedData.value);
-    }
-    else
-    {
-      await DatabaseService.saveSetting("antigenMapping_StoredDefaultGrpMembers", JSON.stringify(DEFAULT_GROUP_MEMBERS));
-    }
-
     const storageKey = `antigenMapping_${normalizedTarget}`;
     const savedDataRaw = await DatabaseService.getSetting(storageKey);
 
@@ -418,6 +431,29 @@ import { useEffect, useState } from 'react';
     } catch (error) {
       console.error("Error loading group order:", error);
       return DEFAULT_GROUP_ORDER;
+    }
+  };
+
+  export const loadGroupMembers = async (manuName: string) => {
+    try {
+      const normalizedManuName = normalizeManufacturerName(manuName);
+      const storageKey = `groupMembers_${normalizedManuName}`;
+      const savedMembersRaw = await DatabaseService.getSetting(storageKey);
+
+      if (savedMembersRaw && savedMembersRaw.value) {
+        return JSON.parse(savedMembersRaw.value);
+      }
+
+      const initialMembers = DataSources[normalizedManuName] || DEFAULT_GROUP_MEMBERS;
+      const copyMembers: Record<string, string[]> = {};
+      for (const key in initialMembers) {
+        copyMembers[key] = [...initialMembers[key]];
+      }
+
+      return copyMembers;
+    } catch (error) {
+      console.error("Error loading group members:", error);
+      return DEFAULT_GROUP_MEMBERS;
     }
   };
 

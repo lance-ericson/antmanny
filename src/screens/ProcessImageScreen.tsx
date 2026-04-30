@@ -153,10 +153,12 @@ const abortControllerRef = useRef<AbortController | null>(null);
       //setIsProcessing(true);
       console.log('Processing image:', uri);
       const normalizedManuNameChoice = manuNameChoice.trim();
+      const [groupMembersSettings, orderedGroups] = await Promise.all([
+        ConstAntigens.loadGroupMembers(normalizedManuNameChoice),
+        ConstAntigens.loadGroupOrder(normalizedManuNameChoice),
+      ]);
 
       // Use the public processFiles method with the required parameters
-      // const grpMembersSettings = await ConstAntigens.loadSettingsForManufacturer(manuNameChoice);
-      //const orderedGroups = await ConstAntigens.loadGroupOrder(manuNameChoice);
       const scanResult = await scannerService.processFile2(uri, true, normalizedManuNameChoice, selectedAnt, groups);
       console.log('Scan completed, navigating to VerifyPanel');
       
@@ -164,8 +166,8 @@ const abortControllerRef = useRef<AbortController | null>(null);
       navigation.navigate('VerifyPanel', { 
         panelData: scanResult.results,
         manufacturerChoice: normalizedManuNameChoice,
-        displayAntigensByGroup: selectedAnt,
-        displayGroups: groups,
+        displayAntigensByGroup: groupMembersSettings,
+        displayGroups: orderedGroups,
       });
     } catch (error) {
       console.error('Image processing error:', error);
@@ -473,7 +475,7 @@ const abortControllerRef = useRef<AbortController | null>(null);
 
       // 3. Apply safe fallbacks for new manufacturers
       setSelected(settings || {});
-      setGroups(order || Object.keys(ConstAntigens.DEFAULT_GROUP_MEMBERS));
+      setGroups(order || ConstAntigens.DEFAULT_GROUP_ORDER);
       
   };  
     
